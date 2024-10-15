@@ -1,0 +1,124 @@
+---
+title: "project 3"
+author: "grace brooks"
+date: "2024-10-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#downloading the data and loading the datasets
+```{r}
+library("here")
+rds_files <- c("b_lyrics.RDS", "ts_lyrics.RDS", "sales.RDS")
+## Check whether we have all 3 files
+if (any(!file.exists(here("data", rds_files)))) {
+    ## If we don't, then download the data
+    b_lyrics <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-29/beyonce_lyrics.csv")
+    ts_lyrics <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-29/taylor_swift_lyrics.csv")
+    sales <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-29/sales.csv")
+
+    ## Then save the data objects to RDS files
+    saveRDS(b_lyrics, file = here("data", "b_lyrics.RDS"))
+    saveRDS(ts_lyrics, file = here("data", "ts_lyrics.RDS"))
+    saveRDS(sales, file = here("data", "sales.RDS"))
+}
+
+b_lyrics <- readRDS(here("data", "b_lyrics.RDS"))
+ts_lyrics <- readRDS(here("data", "ts_lyrics.RDS"))
+sales <- readRDS(here("data", "sales.RDS"))
+```
+#part one: explore album sales
+```{r}
+# part 1a:
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(forcats)
+sales$released<- str_replace(sales$released,"(\\(..\\)\\[..\\])","")
+sales$released<- mdy(sales$released)
+country <- factor(x=sales$country)
+sales$sales<- sales$sales/1000000
+sales_1a<- sales %>% mutate(country= fct_collapse(country, WW = c("WW", "World")))
+sales_1a<- sales_1a %>% mutate(country = fct_other(country, keep = c("UK", "US", "WW")))
+sales_1a<- filter(sales_1a, country != "Other")
+sales_1a %>% group_by(country)
+
+# part 1b:
+sales_1b <- filter(sales_1a, country == "US")
+sales_1b <- mutate(sales_1b, years_since_release = interval(released, today())/years(1))
+sales_1b$years_since_release <- floor(sales_1b$years_since_release)
+sales_1b %>% group_by(artist) %>% summarise(most_recent = min(years_since_release), oldest = max(years_since_release), median = median(years_since_release))
+
+# part 1c:
+sales_1a %>% group_by(artist, country) %>% summarise(total_sales = sum(sales))
+ggplot(sales_1a, aes(fill = country, x = artist,y=sum(sales))) + geom_bar(position = "fill", stat = "identity") + labs(title = "Total Sales by Country for Beyonce and Taylor Swift", subtitle = "Grouped by Percent Sales by Country: US, UK, and WW", y = "Sale Percentages (in millions)", x = "Artist Name") + scale_fill_manual(values = c("lightpink", "lightblue", "plum2")) +theme_dark() 
+
+# part 1d:
+sales_1d<- filter(sales_1a, country == "WW")
+ggplot(sales_1d, aes(fill = artist, x = fct_reorder(.f = title,.x = sales), y = sales)) + geom_bar(stat = "identity") + labs(title = "Total Sales by Album", subtitle = "Breakdown of Taylor Swift and Beyonce Album Sales WorldWide", x = "Name of Album", y = "Worldwide Sales (in millions)") + scale_fill_manual(values = c("cornflowerblue", "pink")) +theme_dark() + theme(axis.text.x = element_text(size = 8, angle = 90)) + coord_flip()
+
+# part 1e:
+ggplot(sales_1a, aes(color = artist, y = sales, x = released)) + geom_point() + labs(title = "Album Sales by Release Date", subtitle = "Looking into the Album Sales in Millions by the Release Dates", x = "Album Release Date", y = "Sales (in millions)") + facet_wrap(~country)+ scale_color_manual(values = c("cornflowerblue","pink")) +theme_dark() + theme(axis.text.x = element_text(size = 8, angle = 90))
+```
+
+#part two: exploring sentiment of lyrics
+```{r}
+library(tidytext)
+# part 2a:
+ts_lyrics_tidy <- ts_lyrics %>% unnest_tokens(output = line, input = Lyrics, token = "lines")
+ts_lyrics_tidy
+#tells us the total number of lines that we have
+nrow(ts_lyrics_tidy)
+#shows the rows that say "hello"
+ts_lyrics_tidy %>% filter(grepl("hello", line))
+#shows the rows that say "goodbye"
+ts_lyrics_tidy %>% filter(grepl("goodbye", line))
+
+# part 2b:
+b_lyrics_tidy <- b_lyrics %>% unnest_tokens(output = line, input = line, token = "lines")
+b_lyrics_tidy
+#tells us the total number of lines that we have
+nrow(b_lyrics_tidy)
+#shows the rows that say "hello"
+b_lyrics_tidy %>% filter(grepl("hello", line))
+#shows the rows that say "goodbye"
+b_lyrics_tidy %>% filter(grepl("goodbye", line))
+
+# part 2c:
+b_lyrics_word <- tibble(text = b_lyrics$line)
+b_lyrics_word %>% unnest_tokens(output = word, input = text, token = "words")
+b_lyrics_clean <- b_lyrics_word %>% unnest_tokens(word, text) %>% anti_join(stop_words)
+b_lyrics_clean
+b_lyrics_clean %>% count(word, sort = TRUE)
+filterd_b_lyrcs <- b_lyrics_clean %>% inner_join(get_sentiments("bing")) %>% count(word, sentiment) %>% filter(n>60)
+ggplot(filterd_b_lyrcs, aes(x = n, y = fct_reorder(.f = word, .x = n), fill = sentiment)) + geom_bar(stat = "identity") + labs(title = "Top 25 Words Used in Beyonce Songs", subtitle = "Words Sorted by Positive/Negative Sentiment", x = "Frequency of Word Use", y = "Top 25 Words") + scale_fill_manual(values = c("lightcoral","mediumaquamarine")) + theme_dark()
+library(wordcloud)
+filterd_b_lyrcs %>% with(wordcloud(word,n, max.words = 25))
+
+# part 2d:
+ts_lyrics_word <- tibble(text = ts_lyrics$Lyrics)
+ts_lyrics_word %>% unnest_tokens(output = word, input = text, token = "words")
+ts_lyrics_clean <- ts_lyrics_word %>% unnest_tokens(word, text) %>% anti_join(stop_words)
+ts_lyrics_clean
+ts_lyrics_clean %>% count(word, sort = TRUE)
+filterd_ts_lyrics <- ts_lyrics_clean %>% inner_join(get_sentiments("bing")) %>% count(word, sentiment) %>% filter(n>18)
+ggplot(filterd_ts_lyrics, aes(x = n, y = fct_reorder(.f = word, .x = n), fill = sentiment)) + geom_bar(stat = "identity") + labs(title = "Top 25 Words Used in Taylor Swift Songs", subtitle = "Words Sorted by Positive/Negative Sentiment", x = "Frequency of Word Use", y = "Top 25 Words") + scale_fill_manual(values = c("lightcoral","mediumaquamarine")) + theme_dark()
+filterd_ts_lyrics %>% with(wordcloud(word, n, max.words = 25))
+
+# part 2e:
+ts_lyrics_word_album <- ts_lyrics %>% unnest_tokens(output = word, input = Lyrics, token = "words")
+ts_lyrics_word_album
+ts_lyrics_wa_clean <- ts_lyrics_word_album %>%  anti_join(stop_words)
+ts_lyrics_wa_clean %>% group_by(Album) %>% count(word)
+library(textdata)
+ts_lyrics_wa_clean <- ts_lyrics_wa_clean %>% inner_join(get_sentiments("afinn"))
+ts_lyrics_wa_clean
+ts_lyrics_wa_clean_sentiment <- ts_lyrics_wa_clean %>% group_by(Album) %>% summarise(sentiment_score = mean(value))
+ts_lyrics_wa_clean_sentiment <- ts_lyrics_wa_clean_sentiment %>% rename(title = Album) 
+ts_lyrics_wa_clean_sentiment$title <- ts_lyrics_wa_clean_sentiment$title %>% str_replace_all("reputation", "Reputation")
+sentiment_sales <- filter(sales_1a, country == "US") %>%inner_join(ts_lyrics_wa_clean_sentiment)
+ggplot(sentiment_sales, aes(x = released, y = sentiment_score, size = sales, color = title)) + guides(size = 'none') + geom_point() + geom_hline(yintercept=0) + labs(title = "Sentiment Scores of Taylor Swift Albums", subtitle = "Looking at the Way Taylor Swift Sentiment Changes Across Albums", y = "Sentiment Score", x = "Album Release Date") + scale_color_manual(values = c("skyblue", "gold", "pink", "red", "black", "orchid", "lightgreen")) + theme_dark()
+#Over time, Taylor Swift's Album Sentiment Has changed pretty significantly. Her early albums have generally much more positive sentiment, with significant dips occurring with the releases of Speak Now, 1989, and Reputation. However, we see with Lover there seems to be an increase in sentiment score. For people who know her better well, one can see that the sentiments seem to align with positive/negative moments in her life/career. 
+```
